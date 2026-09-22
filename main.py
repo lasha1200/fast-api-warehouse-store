@@ -1,5 +1,6 @@
+import time
 import requests
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from redis_om import get_redis_connection, HashModel, Field, Migrator
 from redis_om.model.model import NotFoundError
@@ -38,7 +39,7 @@ class Order(HashModel, index=True):
         database = redis
 
 @app.post("/order")
-def create(productOrder: ProductOrder):
+def create(productOrder: ProductOrder, background_tasks: BackgroundTasks):
     req = requests.get(f'http://localhost:8000/product/{productOrder.product_id}')
     product = req.json()
 
@@ -53,7 +54,11 @@ def create(productOrder: ProductOrder):
         status="pending",
     )
 
-    return order.save()
+    order.save()
+
+    background_tasks.add_task(order_complete, order)
+
+    return order
 
 @app.get("/orders/{pk}")
 @app.get("/order/{pk}")
@@ -92,5 +97,11 @@ def format(pk: str):
         'quantity': order.quantity,
         'status': order.status
     }
+
+def order_complete(order: Order):
+    time.sleep(5)
+    order.status = "completed"
+    order.save()
+    redis.xadd(name = 'order-completed', fields = order.dict())
     
     
